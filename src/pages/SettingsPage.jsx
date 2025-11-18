@@ -790,6 +790,7 @@ import { useTheme } from '../context/ThemeContext.jsx';
 import api from '../services/api';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
+import ProfileSetupForm from '../components/ProfileSetupForm';
 
 const SettingsPage = () => {
  const { theme, toggleTheme } = useTheme();
@@ -814,6 +815,7 @@ const SettingsPage = () => {
  const [isEditingProfile, setIsEditingProfile] = useState(false);
  const [isEditingPassword, setIsEditingPassword] = useState(false);
  const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
+ const [showProfileSetup, setShowProfileSetup] = useState(false);
 
  // Password visibility state only
  const [showPasswords, setShowPasswords] = useState({
@@ -1160,15 +1162,27 @@ const SettingsPage = () => {
  </div>
  </div>
  <button
- onClick={() => setIsEditingProfile(!isEditingProfile)}
+ onClick={() => setShowProfileSetup(!showProfileSetup)}
  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#1AA49B')}
  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#21C1B6')}
  className="px-4 py-2 text-sm font-medium text-white rounded-md transition-colors duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
  style={{ backgroundColor: '#21C1B6' }}
  >
- {isEditingProfile ? 'Cancel' : 'Edit Profile'}
+ {showProfileSetup ? 'Hide Profile Setup' : 'Complete Profile Setup'}
  </button>
  </div>
+
+ {showProfileSetup && (
+ <div className="border-t pt-6 mt-6">
+ <ProfileSetupForm
+ onSave={() => {
+ setShowProfileSetup(false);
+ window.dispatchEvent(new CustomEvent('userInfoUpdated'));
+ toast.success('Profile updated successfully!');
+ }}
+ />
+ </div>
+ )}
 
  {isEditingProfile ? (
  <div className="space-y-4 border-t pt-4">
@@ -1245,14 +1259,10 @@ const SettingsPage = () => {
  <Mail className="w-4 h-4 text-gray-400 mr-3" />
  <span className="text-gray-600">{userData.email || 'Not provided'}</span>
  </div>
- <div className="flex items-center text-sm">
- <Phone className="w-4 h-4 text-gray-400 mr-3" />
- <span className="text-gray-600">{userData.phone || 'Not provided'}</span>
- </div>
- <div className="flex items-center text-sm">
- <MapPin className="w-4 h-4 text-gray-400 mr-3" />
- <span className="text-gray-600">{userData.location || 'Not provided'}</span>
- </div>
+                <div className="flex items-center text-sm">
+                  <Phone className="w-4 h-4 text-gray-400 mr-3" />
+                  <span className="text-gray-600">{userData.phone || 'Not provided'}</span>
+                </div>
  </div>
  )}
  </div>

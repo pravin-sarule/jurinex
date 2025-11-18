@@ -536,6 +536,20 @@ class ApiService {
  });
  }
 
+ // Professional Profile APIs
+ async getProfessionalProfile() {
+ return this.request("/auth/api/auth/professional-profile", {
+ method: "GET",
+ });
+ }
+
+ async updateProfessionalProfile(profileData) {
+ return this.request("/auth/api/auth/professional-profile", {
+ method: "PUT",
+ body: JSON.stringify(profileData),
+ });
+ }
+
  async deleteAccount() {
  return this.request("/auth/api/auth/delete", {
  method: "DELETE",
