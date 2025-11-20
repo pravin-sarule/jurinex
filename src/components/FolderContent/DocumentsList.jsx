@@ -167,6 +167,7 @@ import React, { useState, useEffect } from 'react';
 import DocumentCard from './DocumentCard';
 import UploadDocumentModal from './UploadDocumentModal';
 import documentApi from '../../services/documentApi';
+import { toast } from 'react-toastify';
 
 const DocumentsList = () => {
   const [documents, setDocuments] = useState([]);
@@ -216,6 +217,17 @@ const DocumentsList = () => {
   }, [documents]);
 
   const handleUpload = (files) => {
+    // Check file size limit (30 MB)
+    const MAX_FILE_SIZE = 30 * 1024 * 1024; // 30 MB in bytes
+    const oversizedFiles = Array.from(files).filter(file => file.size > MAX_FILE_SIZE);
+    
+    if (oversizedFiles.length > 0) {
+      toast.error('File size limit exceeded. You can upload only up to 30 MB.', {
+        autoClose: 5000
+      });
+      return;
+    }
+    
     // Create document objects from files
     const newDocuments = files.map((file, index) => ({
       id: `doc-${Date.now()}-${index}`,

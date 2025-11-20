@@ -1258,7 +1258,7 @@ const CaseCreationFlow = ({ onComplete, onCancel, userId = null, skipDraftPrompt
             <div>
               <h1 className="text-2xl font-bold text-gray-800">Create New Case</h1>
               <p className="text-sm text-gray-500">
-                User ID: <span className="font-mono bg-gray-100 px-1 rounded">{actualUserId}</span> | Step {currentStep} of 6
+                Step {currentStep} of 6
               </p>
             </div>
             <button onClick={onCancel} className="text-gray-500 hover:text-gray-700 text-sm">

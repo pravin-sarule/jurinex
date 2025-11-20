@@ -477,9 +477,14 @@ class ApiService {
 
  if (!response.ok) {
  const errorData = await response.json().catch(() => ({}));
- throw new Error(
+ const error = new Error(
  errorData.message || errorData.error || `HTTP error! status: ${response.status}`
  );
+ error.response = {
+ status: response.status,
+ data: errorData
+ };
+ throw error;
  }
 
  if (responseType === "arrayBuffer") {
@@ -533,6 +538,13 @@ class ApiService {
  return this.request("/auth/api/auth/update", {
  method: "PUT",
  body: JSON.stringify(userData),
+ });
+ }
+
+ async updatePassword(passwordData) {
+ return this.request("/auth/api/auth/change-password", {
+ method: "PUT",
+ body: JSON.stringify(passwordData),
  });
  }
 

@@ -582,7 +582,7 @@ const CaseCreationFlow = ({ onComplete, onCancel, userId = null }) => {
             <div>
               <h1 className="text-2xl font-bold text-gray-800">Create New Case</h1>
               <p className="text-sm text-gray-500">
-                User ID: <span className="font-mono bg-gray-100 px-1 rounded">{actualUserId}</span> | Step: {currentStep}
+                Step {currentStep} of 6
               </p>
             </div>
             <button

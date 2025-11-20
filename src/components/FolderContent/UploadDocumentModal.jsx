@@ -428,6 +428,7 @@
 
 
 import React, { useState, useRef } from 'react';
+import { toast } from 'react-toastify';
 
 const UploadDocumentModal = ({ isOpen, onClose, onUpload }) => {
   const [selectedFiles, setSelectedFiles] = useState([]);
@@ -436,6 +437,20 @@ const UploadDocumentModal = ({ isOpen, onClose, onUpload }) => {
 
   const handleFileChange = (e) => {
     const files = Array.from(e.target.files);
+    const MAX_FILE_SIZE = 30 * 1024 * 1024; // 30 MB in bytes
+    const oversizedFiles = files.filter(file => file.size > MAX_FILE_SIZE);
+    
+    if (oversizedFiles.length > 0) {
+      const errorMessage = 'File size limit exceeded. You can upload only up to 30 MB.';
+      setError(errorMessage);
+      toast.error(errorMessage, {
+        autoClose: 5000
+      });
+      setSelectedFiles([]);
+      e.target.value = ''; // Clear the input
+      return;
+    }
+    
     setSelectedFiles(files);
     setError('');
   };
@@ -444,6 +459,19 @@ const UploadDocumentModal = ({ isOpen, onClose, onUpload }) => {
     e.preventDefault();
     e.stopPropagation();
     const files = Array.from(e.dataTransfer.files);
+    const MAX_FILE_SIZE = 30 * 1024 * 1024; // 30 MB in bytes
+    const oversizedFiles = files.filter(file => file.size > MAX_FILE_SIZE);
+    
+    if (oversizedFiles.length > 0) {
+      const errorMessage = 'File size limit exceeded. You can upload only up to 30 MB.';
+      setError(errorMessage);
+      toast.error(errorMessage, {
+        autoClose: 5000
+      });
+      setSelectedFiles([]);
+      return;
+    }
+    
     setSelectedFiles(files);
     setError('');
   };
@@ -501,6 +529,9 @@ const UploadDocumentModal = ({ isOpen, onClose, onUpload }) => {
             </svg>
             <p className="mt-2 text-sm text-gray-400">
               Drag and drop files here, or <span className="font-medium text-blue-400">click to browse</span>
+            </p>
+            <p className="mt-1 text-xs text-gray-500">
+              Maximum file size: 30 MB
             </p>
             {selectedFiles.length > 0 && (
               <div className="mt-3 text-sm text-gray-300">

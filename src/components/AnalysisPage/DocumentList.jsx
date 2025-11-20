@@ -156,6 +156,10 @@ const DocumentList = ({
               if (doc.status !== 'processed') {
                 startProcessingStatusPolling(doc.id);
               }
+              // Open progress popup when clicking anywhere on the document card
+              if (onProgressBarClick) {
+                onProgressBarClick();
+              }
             }}
             className={`p-1.5 rounded-md cursor-pointer transition-colors ${
               fileId === doc.id ? 'bg-[#E0F7F6] border border-[#21C1B6]' : 'bg-white border border-gray-200 hover:bg-gray-50'

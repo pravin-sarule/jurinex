@@ -505,6 +505,13 @@ const JurisdictionStep = ({ caseData, setCaseData }) => {
 
   const API_BASE_URL = 'https://document-service-110685455967.asia-south1.run.app/api/content';
 
+  // Sync local judges state with caseData.judges when it changes (e.g., from draft load)
+  useEffect(() => {
+    if (caseData.judges && Array.isArray(caseData.judges)) {
+      setJudges(caseData.judges);
+    }
+  }, [caseData.judges]);
+
   // Fetch courts on mount
   useEffect(() => {
     fetchCourts();
