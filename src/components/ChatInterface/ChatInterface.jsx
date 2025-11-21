@@ -9515,32 +9515,89 @@ const ChatInterface = () => {
     }
   };
 
-  // Animate typing effect
+  // Animate typing effect - ChatGPT-style word-by-word animation
   const animateResponse = (text) => {
+    // Handle empty or invalid responses
+    if (!text || typeof text !== 'string') {
+      setIsAnimatingResponse(false);
+      setIsGenerating(false);
+      setAnimatedResponseContent(text || '');
+      return;
+    }
+
+    // Cancel any existing animation
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
+      clearTimeout(animationFrameRef.current);
       animationFrameRef.current = null;
     }
+
     setAnimatedResponseContent("");
     setIsAnimatingResponse(true);
     setIsGenerating(true);
-    let i = 0;
-    const charsPerFrame = 3;
-    const animate = () => {
-      if (i < text.length) {
-        const nextChunk = text.slice(i, i + charsPerFrame);
-        setAnimatedResponseContent((prev) => prev + nextChunk);
-        i += charsPerFrame;
+
+    // Split text into words while preserving spaces and newlines
+    const words = text.split(/(\s+)/);
+    let currentIndex = 0;
+    let displayedText = '';
+
+    // If response is very short, show it immediately
+    if (words.length <= 3) {
+      setIsAnimatingResponse(false);
+      setIsGenerating(false);
+      setAnimatedResponseContent(text);
+      return;
+    }
+
+    const animateWord = () => {
+      if (currentIndex < words.length) {
+        // Add the next word to displayed text
+        displayedText += words[currentIndex];
+        setAnimatedResponseContent(displayedText);
+        currentIndex++;
+
+        // Auto-scroll during animation
         if (responseRef.current) {
           responseRef.current.scrollTop = responseRef.current.scrollHeight;
         }
-        animationFrameRef.current = requestAnimationFrame(animate);
+
+        // Calculate delay based on word length and type
+        const word = words[currentIndex - 1];
+        let delay = 15; // Base delay in milliseconds
+        
+        if (word.trim().length === 0) {
+          // For whitespace/newlines, use minimal delay
+          delay = 3;
+        } else if (word.length > 15) {
+          // Very long words get a bit more time
+          delay = 25;
+        } else if (word.length > 10) {
+          // Longer words get slightly more time
+          delay = 20;
+        } else if (/[.!?]\s*$/.test(word)) {
+          // Sentences ending with punctuation get a pause (like ChatGPT)
+          delay = 40;
+        } else if (/[,;:]\s*$/.test(word)) {
+          // Commas and semicolons get a small pause
+          delay = 20;
+        } else if (/^[#*`\-]/.test(word)) {
+          // Markdown syntax characters render quickly
+          delay = 8;
+        }
+
+        // Continue animation with calculated delay
+        animationFrameRef.current = setTimeout(animateWord, delay);
       } else {
+        // Animation complete
         setIsAnimatingResponse(false);
         setIsGenerating(false);
+        setAnimatedResponseContent(text);
+        animationFrameRef.current = null;
       }
     };
-    animationFrameRef.current = requestAnimationFrame(animate);
+
+    // Start animation with a small initial delay for smoother start
+    animationFrameRef.current = setTimeout(animateWord, 20);
   };
 
   // Stop response generation
@@ -9669,6 +9726,8 @@ const ChatInterface = () => {
             setHasResponse(true);
             setHasAiResponse(true);
             setForceSidebarCollapsed(true);
+            // Animate the complete response word-by-word
+            animateResponse(finalResponse);
           }
           break;
         }
@@ -9716,6 +9775,8 @@ const ChatInterface = () => {
               setHasResponse(true);
               setHasAiResponse(true);
               setForceSidebarCollapsed(true);
+              // Animate the complete response word-by-word
+              animateResponse(finalResponse);
             }
             return;
           }
@@ -9730,28 +9791,15 @@ const ChatInterface = () => {
               newSessionId = parsed.session_id || parsed.sessionId || newSessionId;
               messageId = parsed.message_id || parsed.id || messageId;
             } else if (parsed.type === 'chunk') {
-              // Append chunk to buffer
+              // Append chunk to buffer (don't show during streaming - wait for completion)
               streamBufferRef.current += parsed.text || '';
-              
-              // Update UI every 50ms for performance (prevents React freezing)
-              if (streamUpdateTimeoutRef.current) {
-                clearTimeout(streamUpdateTimeoutRef.current);
-              }
-              
-              streamUpdateTimeoutRef.current = setTimeout(() => {
-                setAnimatedResponseContent(streamBufferRef.current);
-                setHasResponse(true);
-                setHasAiResponse(true);
-                setForceSidebarCollapsed(true);
-                if (responseRef.current) {
-                  responseRef.current.scrollTop = responseRef.current.scrollHeight;
-                }
-              }, 50);
             } else if (parsed.type === 'done') {
-              // Final metadata
+              // Final metadata - stream complete, now animate the response
               finalMetadata = parsed;
-              setAnimatedResponseContent(streamBufferRef.current);
+              const finalResponse = streamBufferRef.current;
               setLoadingChat(false);
+              // Animate the complete response word-by-word
+              animateResponse(finalResponse);
             } else if (parsed.type === 'error') {
               setChatError(parsed.error);
               setLoadingChat(false);

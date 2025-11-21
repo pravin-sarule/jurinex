@@ -318,31 +318,101 @@ export const AnalysisPageProvider = ({
     }, 3000);
   };
 
-  // ✅ FUNCTION 7: animateResponse
+  // ✅ FUNCTION 7: animateResponse - ChatGPT-style word-by-word animation
   const animateResponse = (responseText) => {
+    // Handle empty or invalid responses
+    if (!responseText || typeof responseText !== 'string') {
+      setIsAnimatingResponse(false);
+      setAnimatedResponseContent(responseText || '');
+      return;
+    }
+
+    // Cancel any existing animation
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      clearTimeout(animationFrameRef.current);
+    }
+
     setIsAnimatingResponse(true);
     setAnimatedResponseContent('');
-    let index = 0;
 
-    const animateChar = () => {
-      if (index < responseText.length) {
-        setAnimatedResponseContent(responseText.slice(0, index + 1));
-        index++;
-        animationFrameRef.current = requestAnimationFrame(animateChar);
+    // Split text into words while preserving spaces and newlines
+    // This regex splits on word boundaries but keeps the separators
+    const words = responseText.split(/(\s+)/);
+    let currentIndex = 0;
+    let displayedText = '';
+
+    // If response is very short, show it immediately
+    if (words.length <= 3) {
+      setIsAnimatingResponse(false);
+      setAnimatedResponseContent(responseText);
+      return;
+    }
+
+    const animateWord = () => {
+      if (currentIndex < words.length) {
+        // Add the next word to displayed text
+        displayedText += words[currentIndex];
+        setAnimatedResponseContent(displayedText);
+        currentIndex++;
+
+        // Calculate delay based on word length and type
+        // Longer words get slightly more time, punctuation gets less
+        const word = words[currentIndex - 1];
+        let delay = 15; // Base delay in milliseconds (faster for smoother feel)
+        
+        if (word.trim().length === 0) {
+          // For whitespace/newlines, use minimal delay
+          delay = 3;
+        } else if (word.length > 15) {
+          // Very long words get a bit more time
+          delay = 25;
+        } else if (word.length > 10) {
+          // Longer words get slightly more time
+          delay = 20;
+        } else if (/[.!?]\s*$/.test(word)) {
+          // Sentences ending with punctuation get a pause (like ChatGPT)
+          delay = 40;
+        } else if (/[,;:]\s*$/.test(word)) {
+          // Commas and semicolons get a small pause
+          delay = 20;
+        } else if (/^[#*`\-]/.test(word)) {
+          // Markdown syntax characters render quickly
+          delay = 8;
+        }
+
+        // Continue animation with calculated delay
+        animationFrameRef.current = setTimeout(animateWord, delay);
       } else {
+        // Animation complete
         setIsAnimatingResponse(false);
         setAnimatedResponseContent(responseText);
+        animationFrameRef.current = null;
       }
     };
 
-    animationFrameRef.current = requestAnimationFrame(animateChar);
+    // Start animation with a small initial delay for smoother start
+    animationFrameRef.current = setTimeout(animateWord, 20);
   };
 
   // ✅ FUNCTION 8: showResponseImmediately
   const showResponseImmediately = (responseText) => {
+    // Cancel any ongoing animation
+    if (animationFrameRef.current) {
+      clearTimeout(animationFrameRef.current);
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
     setIsAnimatingResponse(false);
     setAnimatedResponseContent(responseText);
     setCurrentResponse(responseText);
+  };
+
+  // ✅ FUNCTION 8.5: stopGeneration - Stop the animation and show full response
+  const stopGeneration = () => {
+    if (isAnimatingResponse && currentResponse) {
+      showResponseImmediately(currentResponse);
+    }
   };
 
   // ✅ FUNCTION 9: chatWithDocument
@@ -535,7 +605,13 @@ export const AnalysisPageProvider = ({
   useEffect(() => {
     return () => {
       if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
-      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+      if (animationFrameRef.current) {
+        // Handle both setTimeout and requestAnimationFrame
+        if (typeof animationFrameRef.current === 'number') {
+          clearTimeout(animationFrameRef.current);
+          cancelAnimationFrame(animationFrameRef.current);
+        }
+      }
     };
   }, []);
 
@@ -632,7 +708,7 @@ export const AnalysisPageProvider = ({
     fileInputRef, dropdownRef, responseRef, markdownOutputRef,
     
     getAuthToken, apiRequest, fetchSecrets, batchUploadDocuments, getProcessingStatus, 
-    startProcessingStatusPolling, animateResponse, showResponseImmediately, chatWithDocument, 
+    startProcessingStatusPolling, animateResponse, showResponseImmediately, stopGeneration, chatWithDocument, 
     handleFileUpload, handleDropdownSelect, handleChatInputChange, handleSend, handleMessageClick, 
     clearAllChatData, startNewChat, formatFileSize, formatDate, handleCopyResponse, highlightText,
     
