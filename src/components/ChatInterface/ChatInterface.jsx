@@ -9325,6 +9325,9 @@ const ChatInterface = () => {
   const markdownOutputRef = useRef(null);
   const horizontalScrollRef = useRef(null);
   const stickyScrollbarRef = useRef(null);
+  const streamBufferRef = useRef('');
+  const streamUpdateTimeoutRef = useRef(null);
+  const streamReaderRef = useRef(null);
 
   // API Configuration
   const API_BASE_URL = "https://gateway-service-110685455967.asia-south1.run.app";
@@ -9551,20 +9554,47 @@ const ChatInterface = () => {
     setLoadingChat(false);
   };
 
-  // Cleanup animation on unmount
+  // Cleanup animation and streaming on unmount
   useEffect(() => {
     return () => {
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
       }
+      // Cleanup streaming
+      if (streamReaderRef.current) {
+        streamReaderRef.current.cancel().catch(() => {});
+      }
+      if (streamUpdateTimeoutRef.current) {
+        clearTimeout(streamUpdateTimeoutRef.current);
+      }
     };
   }, []);
 
-  // Chat with AI using secret prompt
+  // Chat with AI using secret prompt - Streaming version
   const chatWithAI = async (folder, secretId, currentSessionId) => {
+    // Clear previous state
+    setAnimatedResponseContent('');
+    streamBufferRef.current = '';
+    setChatError(null);
+    setLoadingChat(true);
+    setIsAnimatingResponse(false);
+    
+    // Close existing stream if any
+    if (streamReaderRef.current) {
+      try {
+        await streamReaderRef.current.cancel();
+      } catch (e) {
+        // Ignore cancel errors
+      }
+      streamReaderRef.current = null;
+    }
+    
+    if (streamUpdateTimeoutRef.current) {
+      clearTimeout(streamUpdateTimeoutRef.current);
+      streamUpdateTimeoutRef.current = null;
+    }
+
     try {
-      setLoadingChat(true);
-      setChatError(null);
       const isContinuingSession = !!currentSessionId && currentChatHistory.length > 0;
       if (!isContinuingSession) {
         setHasResponse(true);
@@ -9577,60 +9607,160 @@ const ChatInterface = () => {
       const promptLabel = selectedSecret.name;
       if (!promptValue) promptValue = await fetchSecretValue(secretId);
       if (!promptValue) throw new Error("Secret prompt value is empty.");
-      const response = await documentApi.queryFolderDocuments(folder, promptValue, currentSessionId, {
-        used_secret_prompt: true,
-        prompt_label: promptLabel,
-        secret_id: secretId,
+
+      const token = getAuthToken();
+      const response = await fetch(`${API_BASE_URL}/docs/${folder}/query/stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : '',
+          'Accept': 'text/event-stream',
+        },
+        body: JSON.stringify({
+          question: promptValue,
+          session_id: currentSessionId,
+          used_secret_prompt: true,
+          prompt_label: promptLabel,
+          secret_id: secretId,
+        }),
       });
-      const sessionId = response.sessionId || response.session_id || response.id;
-      if (sessionId) {
-        setSelectedChatSessionId(sessionId);
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
-      let history = [];
-      let responseText = "";
-      let messageId = null;
-      if (Array.isArray(response.chatHistory) && response.chatHistory.length > 0) {
-        history = response.chatHistory;
-        const latestMessage = history[history.length - 1];
-        responseText = latestMessage.response || latestMessage.answer || latestMessage.message || "";
-        messageId = latestMessage.id;
-      } else if (Array.isArray(response.chat_history) && response.chat_history.length > 0) {
-        history = response.chat_history;
-        const latestMessage = history[history.length - 1];
-        responseText = latestMessage.response || latestMessage.answer || latestMessage.message || "";
-        messageId = latestMessage.id;
-      } else if (Array.isArray(response.messages) && response.messages.length > 0) {
-        history = response.messages;
-        const latestMessage = history[history.length - 1];
-        responseText = latestMessage.response || latestMessage.answer || latestMessage.message || latestMessage.content || "";
-        messageId = latestMessage.id;
-      } else if (response.response || response.answer || response.message || response.content) {
-        responseText = response.response || response.answer || response.message || response.content;
-        messageId = response.id || Date.now().toString();
-        const newMessage = {
-          id: messageId,
-          question: promptLabel,
-          response: responseText,
-          timestamp: new Date().toISOString(),
-          created_at: new Date().toISOString(),
-          isSecretPrompt: true,
-        };
-        history = isContinuingSession ? [...currentChatHistory, newMessage] : [newMessage];
+
+      const reader = response.body.getReader();
+      streamReaderRef.current = reader;
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let newSessionId = currentSessionId;
+      let finalMetadata = null;
+      let messageId = Date.now().toString();
+
+      while (true) {
+        const { done, value } = await reader.read();
+        
+        if (done) {
+          setLoadingChat(false);
+          // Create message with final response
+          const finalResponse = streamBufferRef.current;
+          if (finalMetadata) {
+            newSessionId = finalMetadata.session_id || finalMetadata.sessionId || newSessionId;
+            messageId = finalMetadata.message_id || finalMetadata.id || messageId;
+          }
+          
+          const newMessage = {
+            id: messageId,
+            question: promptLabel,
+            response: finalResponse,
+            timestamp: new Date().toISOString(),
+            created_at: new Date().toISOString(),
+            isSecretPrompt: true,
+          };
+          const history = isContinuingSession ? [...currentChatHistory, newMessage] : [newMessage];
+          setCurrentChatHistory(history);
+          
+          if (newSessionId) {
+            setSelectedChatSessionId(newSessionId);
+          }
+          
+          if (finalResponse && finalResponse.trim()) {
+            setSelectedMessageId(messageId);
+            setHasResponse(true);
+            setHasAiResponse(true);
+            setForceSidebarCollapsed(true);
+          }
+          break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || ''; // Keep incomplete line
+
+        for (const line of lines) {
+          if (!line.trim() || !line.startsWith('data: ')) continue;
+          
+          const data = line.replace(/^data: /, '').trim();
+          
+          // Handle heartbeat
+          if (data === '[PING]') {
+            continue; // Ignore heartbeat
+          }
+          
+          // Handle completion
+          if (data === '[DONE]') {
+            setLoadingChat(false);
+            const finalResponse = streamBufferRef.current;
+            if (finalMetadata) {
+              newSessionId = finalMetadata.session_id || finalMetadata.sessionId || newSessionId;
+              messageId = finalMetadata.message_id || finalMetadata.id || messageId;
+            }
+            
+            const newMessage = {
+              id: messageId,
+              question: promptLabel,
+              response: finalResponse,
+              timestamp: new Date().toISOString(),
+              created_at: new Date().toISOString(),
+              isSecretPrompt: true,
+            };
+            const history = isContinuingSession ? [...currentChatHistory, newMessage] : [newMessage];
+            setCurrentChatHistory(history);
+            
+            if (newSessionId) {
+              setSelectedChatSessionId(newSessionId);
+            }
+            
+            if (finalResponse && finalResponse.trim()) {
+              setSelectedMessageId(messageId);
+              setHasResponse(true);
+              setHasAiResponse(true);
+              setForceSidebarCollapsed(true);
+            }
+            return;
+          }
+
+          // Parse JSON data
+          try {
+            const parsed = JSON.parse(data);
+            
+            if (parsed.type === 'metadata') {
+              // Handle metadata (session_id, etc.)
+              console.log('Stream metadata:', parsed);
+              newSessionId = parsed.session_id || parsed.sessionId || newSessionId;
+              messageId = parsed.message_id || parsed.id || messageId;
+            } else if (parsed.type === 'chunk') {
+              // Append chunk to buffer
+              streamBufferRef.current += parsed.text || '';
+              
+              // Update UI every 50ms for performance (prevents React freezing)
+              if (streamUpdateTimeoutRef.current) {
+                clearTimeout(streamUpdateTimeoutRef.current);
+              }
+              
+              streamUpdateTimeoutRef.current = setTimeout(() => {
+                setAnimatedResponseContent(streamBufferRef.current);
+                setHasResponse(true);
+                setHasAiResponse(true);
+                setForceSidebarCollapsed(true);
+                if (responseRef.current) {
+                  responseRef.current.scrollTop = responseRef.current.scrollHeight;
+                }
+              }, 50);
+            } else if (parsed.type === 'done') {
+              // Final metadata
+              finalMetadata = parsed;
+              setAnimatedResponseContent(streamBufferRef.current);
+              setLoadingChat(false);
+            } else if (parsed.type === 'error') {
+              setChatError(parsed.error);
+              setLoadingChat(false);
+            }
+          } catch (e) {
+            // Skip invalid JSON - might be partial data
+          }
+        }
       }
-      setCurrentChatHistory(history);
-      if (responseText && responseText.trim()) {
-        setSelectedMessageId(messageId);
-        setHasResponse(true);
-        setHasAiResponse(true);
-        setForceSidebarCollapsed(true);
-        animateResponse(responseText);
-      } else {
-        setChatError("Received empty response from server.");
-        setHasResponse(false);
-        setHasAiResponse(false);
-        setForceSidebarCollapsed(false);
-      }
-      return response;
     } catch (error) {
       console.error("Chat error:", error);
       setChatError(`Analysis failed: ${error.message}`);
@@ -9640,10 +9770,11 @@ const ChatInterface = () => {
       throw error;
     } finally {
       setLoadingChat(false);
+      streamReaderRef.current = null;
     }
   };
 
-  // Handle new message
+  // Handle new message - Streaming version
   const handleNewMessage = async () => {
     if (!selectedFolder) return;
     if (isSecretPromptSelected) {
@@ -9660,70 +9791,190 @@ const ChatInterface = () => {
     } else {
       if (!chatInput.trim()) return;
       const questionText = chatInput.trim();
-      setLoadingChat(true);
+      
+      // Clear previous state
+      setAnimatedResponseContent('');
+      streamBufferRef.current = '';
       setChatError(null);
+      setLoadingChat(true);
+      setIsAnimatingResponse(false);
+      
+      // Close existing stream if any
+      if (streamReaderRef.current) {
+        try {
+          await streamReaderRef.current.cancel();
+        } catch (e) {
+          // Ignore cancel errors
+        }
+        streamReaderRef.current = null;
+      }
+      
+      if (streamUpdateTimeoutRef.current) {
+        clearTimeout(streamUpdateTimeoutRef.current);
+        streamUpdateTimeoutRef.current = null;
+      }
+
       const isContinuingSession = !!selectedChatSessionId && currentChatHistory.length > 0;
       if (!isContinuingSession) {
         setHasResponse(true);
         setHasAiResponse(true);
         setForceSidebarCollapsed(true);
       }
+      
       try {
-        const response = await documentApi.queryFolderDocuments(
-          selectedFolder,
-          questionText,
-          selectedChatSessionId,
-          { used_secret_prompt: false }
-        );
-        const sessionId = response.sessionId || response.session_id || response.id;
-        if (sessionId) {
-          setSelectedChatSessionId(sessionId);
-        }
-        let history = [];
-        let responseText = "";
-        let messageId = null;
-        if (Array.isArray(response.chatHistory) && response.chatHistory.length > 0) {
-          history = response.chatHistory;
-          const latestMessage = history[history.length - 1];
-          responseText = latestMessage.response || latestMessage.answer || latestMessage.message || "";
-          messageId = latestMessage.id;
-        } else if (Array.isArray(response.chat_history) && response.chat_history.length > 0) {
-          history = response.chat_history;
-          const latestMessage = history[history.length - 1];
-          responseText = latestMessage.response || latestMessage.answer || latestMessage.message || "";
-          messageId = latestMessage.id;
-        } else if (Array.isArray(response.messages) && response.messages.length > 0) {
-          history = response.messages;
-          const latestMessage = history[history.length - 1];
-          responseText = latestMessage.response || latestMessage.answer || latestMessage.message || latestMessage.content || "";
-          messageId = latestMessage.id;
-        } else if (response.response || response.answer || response.message || response.content) {
-          responseText = response.response || response.answer || response.message || response.content;
-          messageId = response.id || Date.now().toString();
-          const newMessage = {
-            id: messageId,
+        const token = getAuthToken();
+        const response = await fetch(`${API_BASE_URL}/docs/${selectedFolder}/query/stream`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': token ? `Bearer ${token}` : '',
+            'Accept': 'text/event-stream',
+          },
+          body: JSON.stringify({
             question: questionText,
-            response: responseText,
-            timestamp: new Date().toISOString(),
-            created_at: new Date().toISOString(),
-            isSecretPrompt: false,
-          };
-          history = isContinuingSession ? [...currentChatHistory, newMessage] : [newMessage];
+            session_id: selectedChatSessionId,
+            used_secret_prompt: false,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
         }
-        setCurrentChatHistory(history);
-        if (responseText && responseText.trim()) {
-          setSelectedMessageId(messageId);
-          setHasResponse(true);
-          setHasAiResponse(true);
-          setForceSidebarCollapsed(true);
-          animateResponse(responseText);
-        } else {
-          setChatError("Received empty response from server.");
-          setHasResponse(false);
-          setHasAiResponse(false);
-          setForceSidebarCollapsed(false);
+
+        const reader = response.body.getReader();
+        streamReaderRef.current = reader;
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let newSessionId = selectedChatSessionId;
+        let finalMetadata = null;
+        let messageId = Date.now().toString();
+
+        while (true) {
+          const { done, value } = await reader.read();
+          
+          if (done) {
+            setLoadingChat(false);
+            // Create message with final response
+            const finalResponse = streamBufferRef.current;
+            if (finalMetadata) {
+              newSessionId = finalMetadata.session_id || finalMetadata.sessionId || newSessionId;
+              messageId = finalMetadata.message_id || finalMetadata.id || messageId;
+            }
+            
+            const newMessage = {
+              id: messageId,
+              question: questionText,
+              response: finalResponse,
+              timestamp: new Date().toISOString(),
+              created_at: new Date().toISOString(),
+              isSecretPrompt: false,
+            };
+            const history = isContinuingSession ? [...currentChatHistory, newMessage] : [newMessage];
+            setCurrentChatHistory(history);
+            
+            if (newSessionId) {
+              setSelectedChatSessionId(newSessionId);
+            }
+            
+            if (finalResponse && finalResponse.trim()) {
+              setSelectedMessageId(messageId);
+              setHasResponse(true);
+              setHasAiResponse(true);
+              setForceSidebarCollapsed(true);
+            }
+            setChatInput("");
+            break;
+          }
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || ''; // Keep incomplete line
+
+          for (const line of lines) {
+            if (!line.trim() || !line.startsWith('data: ')) continue;
+            
+            const data = line.replace(/^data: /, '').trim();
+            
+            // Handle heartbeat
+            if (data === '[PING]') {
+              continue; // Ignore heartbeat
+            }
+            
+            // Handle completion
+            if (data === '[DONE]') {
+              setLoadingChat(false);
+              const finalResponse = streamBufferRef.current;
+              if (finalMetadata) {
+                newSessionId = finalMetadata.session_id || finalMetadata.sessionId || newSessionId;
+                messageId = finalMetadata.message_id || finalMetadata.id || messageId;
+              }
+              
+              const newMessage = {
+                id: messageId,
+                question: questionText,
+                response: finalResponse,
+                timestamp: new Date().toISOString(),
+                created_at: new Date().toISOString(),
+                isSecretPrompt: false,
+              };
+              const history = isContinuingSession ? [...currentChatHistory, newMessage] : [newMessage];
+              setCurrentChatHistory(history);
+              
+              if (newSessionId) {
+                setSelectedChatSessionId(newSessionId);
+              }
+              
+              if (finalResponse && finalResponse.trim()) {
+                setSelectedMessageId(messageId);
+                setHasResponse(true);
+                setHasAiResponse(true);
+                setForceSidebarCollapsed(true);
+              }
+              setChatInput("");
+              return;
+            }
+
+            // Parse JSON data
+            try {
+              const parsed = JSON.parse(data);
+              
+              if (parsed.type === 'metadata') {
+                // Handle metadata (session_id, etc.)
+                console.log('Stream metadata:', parsed);
+                newSessionId = parsed.session_id || parsed.sessionId || newSessionId;
+                messageId = parsed.message_id || parsed.id || messageId;
+              } else if (parsed.type === 'chunk') {
+                // Append chunk to buffer
+                streamBufferRef.current += parsed.text || '';
+                
+                // Update UI every 50ms for performance (prevents React freezing)
+                if (streamUpdateTimeoutRef.current) {
+                  clearTimeout(streamUpdateTimeoutRef.current);
+                }
+                
+                streamUpdateTimeoutRef.current = setTimeout(() => {
+                  setAnimatedResponseContent(streamBufferRef.current);
+                  setHasResponse(true);
+                  setHasAiResponse(true);
+                  setForceSidebarCollapsed(true);
+                  if (responseRef.current) {
+                    responseRef.current.scrollTop = responseRef.current.scrollHeight;
+                  }
+                }, 50);
+              } else if (parsed.type === 'done') {
+                // Final metadata
+                finalMetadata = parsed;
+                setAnimatedResponseContent(streamBufferRef.current);
+                setLoadingChat(false);
+              } else if (parsed.type === 'error') {
+                setChatError(parsed.error);
+                setLoadingChat(false);
+              }
+            } catch (e) {
+              // Skip invalid JSON - might be partial data
+            }
+          }
         }
-        setChatInput("");
       } catch (err) {
         console.error("Error sending message:", err);
         setChatError(`Failed to send message: ${err.response?.data?.details || err.message}`);
@@ -9732,6 +9983,7 @@ const ChatInterface = () => {
         setForceSidebarCollapsed(false);
       } finally {
         setLoadingChat(false);
+        streamReaderRef.current = null;
       }
     }
   };

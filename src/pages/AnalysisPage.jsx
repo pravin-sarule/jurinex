@@ -2998,6 +2998,9 @@ const AnalysisPage = () => {
   const uploadIntervalRef = useRef(null);
   const batchPollingIntervalsRef = useRef({});
   const simulatedProgressIntervalsRef = useRef({});
+  const streamBufferRef = useRef('');
+  const streamUpdateTimeoutRef = useRef(null);
+  const streamReaderRef = useRef(null);
 
   // API Configuration
   const API_BASE_URL = 'https://gateway-service-110685455967.asia-south1.run.app';
@@ -3874,12 +3877,33 @@ const AnalysisPage = () => {
     return <Send className={baseClass} />;
   };
 
-  // Chat with document
+  // Chat with document - Streaming version
   const chatWithDocument = async (file_id, question, currentSessionId, llm_name = null) => {
+    // Clear previous state
+    setCurrentResponse('');
+    streamBufferRef.current = '';
+    setError(null);
+    setIsLoading(true);
+    setIsAnimatingResponse(false);
+    
+    // Close existing stream if any
+    if (streamReaderRef.current) {
+      try {
+        await streamReaderRef.current.cancel();
+      } catch (e) {
+        // Ignore cancel errors
+      }
+      streamReaderRef.current = null;
+    }
+    
+    if (streamUpdateTimeoutRef.current) {
+      clearTimeout(streamUpdateTimeoutRef.current);
+      streamUpdateTimeoutRef.current = null;
+    }
+
     try {
-      setIsLoading(true);
-      setError(null);
-      console.log('[chatWithDocument] Sending custom query. LLM:', llm_name || 'default (backend)');
+      console.log('[chatWithDocument] Sending custom query with streaming. LLM:', llm_name || 'default (backend)');
+      const token = getAuthToken();
       const body = {
         file_id: file_id,
         question: question.trim(),
@@ -3890,54 +3914,147 @@ const AnalysisPage = () => {
       if (llm_name) {
         body.llm_name = llm_name;
       }
-      const data = await apiRequest('/files/chat', {
+
+      const response = await fetch(`${API_BASE_URL}/files/chat/stream`, {
         method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : '',
+          'Accept': 'text/event-stream',
+        },
         body: JSON.stringify(body),
       });
-      const response = data.answer || data.response || 'No response received';
-      const newSessionId = data.session_id || currentSessionId;
-      if (data.history && Array.isArray(data.history)) {
-        setMessages(data.history);
-        const latestMessage = data.history[data.history.length - 1];
-        if (latestMessage) {
-          setSelectedMessageId(latestMessage.id);
-          setCurrentResponse(latestMessage.answer);
-          if (latestMessage.answer.length > LARGE_RESPONSE_THRESHOLD) {
-            showResponseImmediately(latestMessage.answer);
-          } else {
-            animateResponse(latestMessage.answer);
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const reader = response.body.getReader();
+      streamReaderRef.current = reader;
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let newSessionId = currentSessionId;
+      let finalMetadata = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        
+        if (done) {
+          setIsLoading(false);
+          // Create message with final response
+          const finalResponse = streamBufferRef.current;
+          if (finalMetadata) {
+            newSessionId = finalMetadata.session_id || newSessionId;
+          }
+          
+          const newChat = {
+            id: Date.now(),
+            file_id: file_id,
+            session_id: newSessionId,
+            question: question.trim(),
+            answer: finalResponse,
+            display_text_left_panel: question.trim(),
+            timestamp: new Date().toISOString(),
+            used_chunk_ids: finalMetadata?.used_chunk_ids || [],
+            confidence: finalMetadata?.confidence || 0.8,
+            type: 'chat',
+            used_secret_prompt: false,
+          };
+          setMessages((prev) => [...prev, newChat]);
+          setSelectedMessageId(newChat.id);
+          setSessionId(newSessionId);
+          setChatInput('');
+          setHasResponse(true);
+          setSuccess('Question answered!');
+          break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || ''; // Keep incomplete line
+
+        for (const line of lines) {
+          if (!line.trim() || !line.startsWith('data: ')) continue;
+          
+          const data = line.replace(/^data: /, '').trim();
+          
+          // Handle heartbeat
+          if (data === '[PING]') {
+            continue; // Ignore heartbeat
+          }
+          
+          // Handle completion
+          if (data === '[DONE]') {
+            setIsLoading(false);
+            const finalResponse = streamBufferRef.current;
+            if (finalMetadata) {
+              newSessionId = finalMetadata.session_id || newSessionId;
+            }
+            
+            const newChat = {
+              id: Date.now(),
+              file_id: file_id,
+              session_id: newSessionId,
+              question: question.trim(),
+              answer: finalResponse,
+              display_text_left_panel: question.trim(),
+              timestamp: new Date().toISOString(),
+              used_chunk_ids: finalMetadata?.used_chunk_ids || [],
+              confidence: finalMetadata?.confidence || 0.8,
+              type: 'chat',
+              used_secret_prompt: false,
+            };
+            setMessages((prev) => [...prev, newChat]);
+            setSelectedMessageId(newChat.id);
+            setSessionId(newSessionId);
+            setChatInput('');
+            setHasResponse(true);
+            setSuccess('Question answered!');
+            return;
+          }
+
+          // Parse JSON data
+          try {
+            const parsed = JSON.parse(data);
+            
+            if (parsed.type === 'metadata') {
+              // Handle metadata (session_id, etc.)
+              console.log('Stream metadata:', parsed);
+              newSessionId = parsed.session_id || newSessionId;
+            } else if (parsed.type === 'chunk') {
+              // Append chunk to buffer
+              streamBufferRef.current += parsed.text || '';
+              
+              // Update UI every 50ms for performance (prevents React freezing)
+              if (streamUpdateTimeoutRef.current) {
+                clearTimeout(streamUpdateTimeoutRef.current);
+              }
+              
+              streamUpdateTimeoutRef.current = setTimeout(() => {
+                setCurrentResponse(streamBufferRef.current);
+                showResponseImmediately(streamBufferRef.current);
+                setHasResponse(true);
+                if (responseRef.current) {
+                  responseRef.current.scrollTop = responseRef.current.scrollHeight;
+                }
+              }, 50);
+            } else if (parsed.type === 'done') {
+              // Final metadata
+              finalMetadata = parsed;
+              setCurrentResponse(streamBufferRef.current);
+              showResponseImmediately(streamBufferRef.current);
+              setIsLoading(false);
+            } else if (parsed.type === 'error') {
+              setError(parsed.error);
+              setIsLoading(false);
+            }
+          } catch (e) {
+            // Skip invalid JSON - might be partial data
           }
         }
-      } else {
-        const newChat = {
-          id: Date.now(),
-          file_id: file_id,
-          session_id: newSessionId,
-          question: question.trim(),
-          answer: response,
-          display_text_left_panel: question.trim(),
-          timestamp: new Date().toISOString(),
-          used_chunk_ids: data.used_chunk_ids || [],
-          confidence: data.confidence || 0.8,
-          type: 'chat',
-          used_secret_prompt: false,
-        };
-        setMessages((prev) => [...prev, newChat]);
-        setSelectedMessageId(newChat.id);
-        setCurrentResponse(response);
-        if (response.length > LARGE_RESPONSE_THRESHOLD) {
-          showResponseImmediately(response);
-        } else {
-          animateResponse(response);
-        }
       }
-      setSessionId(newSessionId);
-      setChatInput('');
-      setHasResponse(true);
-      setSuccess('Question answered!');
-      return data;
     } catch (error) {
-      console.error('[chatWithDocument] Error:', error);
+      console.error('[chatWithDocument] Streaming error:', error);
       // Handle specific error cases
       if (error.message && error.message.includes('No content found')) {
         setError('Document is still processing. Please wait a few moments and try again.');
@@ -3956,9 +4073,11 @@ const AnalysisPage = () => {
       } else {
         setError(`Chat failed: ${error.message}`);
       }
+      setIsLoading(false);
       throw error;
     } finally {
       setIsLoading(false);
+      streamReaderRef.current = null;
     }
   };
 
@@ -4061,15 +4180,41 @@ const AnalysisPage = () => {
       try {
         setIsGeneratingInsights(true);
         setError(null);
-        console.log('[handleSend] Triggering secret analysis with:', {
+        console.log('[handleSend] Triggering secret analysis with streaming:', {
           secretId: selectedSecretId,
           fileId,
           additionalInput: chatInput.trim(),
           promptLabel: promptLabel,
           llmName: selectedLlmName,
         });
-        const data = await apiRequest('/files/chat', {
+        
+        // Clear previous state
+        setCurrentResponse('');
+        streamBufferRef.current = '';
+        
+        // Close existing stream if any
+        if (streamReaderRef.current) {
+          try {
+            await streamReaderRef.current.cancel();
+          } catch (e) {
+            // Ignore cancel errors
+          }
+          streamReaderRef.current = null;
+        }
+        
+        if (streamUpdateTimeoutRef.current) {
+          clearTimeout(streamUpdateTimeoutRef.current);
+          streamUpdateTimeoutRef.current = null;
+        }
+
+        const token = getAuthToken();
+        const response = await fetch(`${API_BASE_URL}/files/chat/stream`, {
           method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': token ? `Bearer ${token}` : '',
+            'Accept': 'text/event-stream',
+          },
           body: JSON.stringify({
             file_id: fileId,
             secret_id: selectedSecretId,
@@ -4080,37 +4225,141 @@ const AnalysisPage = () => {
             additional_input: chatInput.trim() || '',
           }),
         });
-        console.log('[handleSend] Received response:', data);
-        const response = data.answer || data.response || 'No response received';
-        const newSessionId = data.session_id || sessionId;
-        const newChat = {
-          id: Date.now(),
-          file_id: fileId,
-          session_id: newSessionId,
-          question: promptLabel,
-          answer: response,
-          display_text_left_panel: `Analysis: ${promptLabel}`,
-          timestamp: new Date().toISOString(),
-          used_chunk_ids: data.used_chunk_ids || [],
-          confidence: data.confidence || 0.8,
-          type: 'chat',
-          used_secret_prompt: true,
-          prompt_label: promptLabel,
-        };
-        setMessages((prev) => [...prev, newChat]);
-        setSelectedMessageId(newChat.id);
-        setCurrentResponse(response);
-        if (response.length > LARGE_RESPONSE_THRESHOLD) {
-          showResponseImmediately(response);
-        } else {
-          animateResponse(response);
+
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
         }
-        setSessionId(newSessionId);
-        setChatInput('');
-        setHasResponse(true);
-        setSuccess('Analysis completed successfully!');
-        setIsSecretPromptSelected(false);
-        setActiveDropdown('Custom Query');
+
+        const reader = response.body.getReader();
+        streamReaderRef.current = reader;
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let newSessionId = sessionId;
+        let finalMetadata = null;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          
+          if (done) {
+            setIsGeneratingInsights(false);
+            // Create message with final response
+            const finalResponse = streamBufferRef.current;
+            if (finalMetadata) {
+              newSessionId = finalMetadata.session_id || newSessionId;
+            }
+            
+            const newChat = {
+              id: Date.now(),
+              file_id: fileId,
+              session_id: newSessionId,
+              question: promptLabel,
+              answer: finalResponse,
+              display_text_left_panel: `Analysis: ${promptLabel}`,
+              timestamp: new Date().toISOString(),
+              used_chunk_ids: finalMetadata?.used_chunk_ids || [],
+              confidence: finalMetadata?.confidence || 0.8,
+              type: 'chat',
+              used_secret_prompt: true,
+              prompt_label: promptLabel,
+            };
+            setMessages((prev) => [...prev, newChat]);
+            setSelectedMessageId(newChat.id);
+            setSessionId(newSessionId);
+            setChatInput('');
+            setHasResponse(true);
+            setSuccess('Analysis completed successfully!');
+            setIsSecretPromptSelected(false);
+            setActiveDropdown('Custom Query');
+            break;
+          }
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || ''; // Keep incomplete line
+
+          for (const line of lines) {
+            if (!line.trim() || !line.startsWith('data: ')) continue;
+            
+            const data = line.replace(/^data: /, '').trim();
+            
+            // Handle heartbeat
+            if (data === '[PING]') {
+              continue; // Ignore heartbeat
+            }
+            
+            // Handle completion
+            if (data === '[DONE]') {
+              setIsGeneratingInsights(false);
+              const finalResponse = streamBufferRef.current;
+              if (finalMetadata) {
+                newSessionId = finalMetadata.session_id || newSessionId;
+              }
+              
+              const newChat = {
+                id: Date.now(),
+                file_id: fileId,
+                session_id: newSessionId,
+                question: promptLabel,
+                answer: finalResponse,
+                display_text_left_panel: `Analysis: ${promptLabel}`,
+                timestamp: new Date().toISOString(),
+                used_chunk_ids: finalMetadata?.used_chunk_ids || [],
+                confidence: finalMetadata?.confidence || 0.8,
+                type: 'chat',
+                used_secret_prompt: true,
+                prompt_label: promptLabel,
+              };
+              setMessages((prev) => [...prev, newChat]);
+              setSelectedMessageId(newChat.id);
+              setSessionId(newSessionId);
+              setChatInput('');
+              setHasResponse(true);
+              setSuccess('Analysis completed successfully!');
+              setIsSecretPromptSelected(false);
+              setActiveDropdown('Custom Query');
+              return;
+            }
+
+            // Parse JSON data
+            try {
+              const parsed = JSON.parse(data);
+              
+              if (parsed.type === 'metadata') {
+                // Handle metadata (session_id, etc.)
+                console.log('Stream metadata:', parsed);
+                newSessionId = parsed.session_id || newSessionId;
+              } else if (parsed.type === 'chunk') {
+                // Append chunk to buffer
+                streamBufferRef.current += parsed.text || '';
+                
+                // Update UI every 50ms for performance (prevents React freezing)
+                if (streamUpdateTimeoutRef.current) {
+                  clearTimeout(streamUpdateTimeoutRef.current);
+                }
+                
+                streamUpdateTimeoutRef.current = setTimeout(() => {
+                  setCurrentResponse(streamBufferRef.current);
+                  showResponseImmediately(streamBufferRef.current);
+                  setHasResponse(true);
+                  if (responseRef.current) {
+                    responseRef.current.scrollTop = responseRef.current.scrollHeight;
+                  }
+                }, 50);
+              } else if (parsed.type === 'done') {
+                // Final metadata
+                finalMetadata = parsed;
+                setCurrentResponse(streamBufferRef.current);
+                showResponseImmediately(streamBufferRef.current);
+                setIsGeneratingInsights(false);
+              } else if (parsed.type === 'error') {
+                setError(parsed.error);
+                setIsGeneratingInsights(false);
+              }
+            } catch (e) {
+              // Skip invalid JSON - might be partial data
+            }
+          }
+        }
       } catch (error) {
         console.error('[handleSend] Analysis error:', error);
         // Handle specific error cases
@@ -4129,6 +4378,7 @@ const AnalysisPage = () => {
         }
       } finally {
         setIsGeneratingInsights(false);
+        streamReaderRef.current = null;
       }
     } else {
       if (!chatInput.trim()) {
@@ -4317,6 +4567,13 @@ const AnalysisPage = () => {
     return () => {
       if (pollingIntervalRef.current) {
         clearInterval(pollingIntervalRef.current);
+      }
+      // Cleanup streaming
+      if (streamReaderRef.current) {
+        streamReaderRef.current.cancel().catch(() => {});
+      }
+      if (streamUpdateTimeoutRef.current) {
+        clearTimeout(streamUpdateTimeoutRef.current);
       }
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
