@@ -2721,6 +2721,8 @@ import MessagesList from '../components/AnalysisPage/MessageList';
 import DocumentList from '../components/AnalysisPage/DocumentList';
 import DocumentViewer from '../components/AnalysisPage/DocumentViewer';
 import ProgressStagesPopup from '../components/AnalysisPage/ProgressStagesPopup';
+import MindmapContainer from '../components/AnalysisPage/MindmapContainer';
+import MindmapViewer from '../components/AnalysisPage/MindmapViewer';
 import {
   Search,
   Send,
@@ -2750,6 +2752,8 @@ import {
   Circle,
   CreditCard,
   Square,
+  Wrench,
+  Network,
 } from 'lucide-react';
 
 const PROGRESS_STAGES = {
@@ -2973,6 +2977,14 @@ const AnalysisPage = () => {
   const [displayLimit, setDisplayLimit] = useState(10);
   const [showAllChats, setShowAllChats] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
+  const [showToolsDropdown, setShowToolsDropdown] = useState(false);
+
+  // Mindmap state
+  const [showMindmap, setShowMindmap] = useState(false);
+  const [selectedMindmapMessageId, setSelectedMindmapMessageId] = useState(null);
+  const [mindmapData, setMindmapData] = useState(null);
+  const [isGeneratingMindmap, setIsGeneratingMindmap] = useState(false);
+  const [mindmapError, setMindmapError] = useState(null);
 
   // Secrets state
   const [secrets, setSecrets] = useState([]);
@@ -4415,6 +4427,8 @@ const AnalysisPage = () => {
     setSelectedMessageId(message.id);
     setCurrentResponse(message.answer);
     showResponseImmediately(message.answer);
+    setShowMindmap(false);
+    setSelectedMindmapMessageId(null);
    
     // If message has a file_id, verify and update the document processing status
     // Messages can only exist if document was processed, so set status to processed
@@ -4480,6 +4494,12 @@ const AnalysisPage = () => {
     setIsSecretPromptSelected(false);
     setSelectedMessageId(null);
     setActiveDropdown('Custom Query');
+    // Clear mindmap state for new session
+    setShowMindmap(false);
+    setSelectedMindmapMessageId(null);
+    setMindmapData(null);
+    setIsGeneratingMindmap(false);
+    setMindmapError(null);
     const newSessionId = `session-${Date.now()}`;
     setSessionId(newSessionId);
     setSuccess('New chat session started!');
@@ -5395,6 +5415,36 @@ const AnalysisPage = () => {
                     </div>
                   )}
                 </div>
+                <div className="relative flex-shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setShowToolsDropdown(!showToolsDropdown)}
+                    disabled={isLoading || isGeneratingInsights || !fileId}
+                    className="flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Tools"
+                  >
+                    <Wrench className="h-3 w-3 sm:h-4 sm:w-4" />
+                    <span className="hidden sm:inline">Tools</span>
+                    <ChevronDown className="h-3 w-3 sm:h-4 sm:w-4" />
+                  </button>
+                  {showToolsDropdown && (
+                    <div className="absolute bottom-full left-0 mb-2 w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-20">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowMindmap(true);
+                          setShowToolsDropdown(false);
+                          setShowSplitView(true);
+                          setSelectedMindmapMessageId('mindmap');
+                        }}
+                        className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 first:rounded-t-lg last:rounded-b-lg flex items-center space-x-2"
+                      >
+                        <Network className="h-4 w-4" />
+                        <span>Mindmap</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
                 <input
                   type="text"
                   value={chatInput}
@@ -5542,7 +5592,31 @@ const AnalysisPage = () => {
                 />
               </div>
             )}
-            <MessagesList
+            
+            {/* Mindmap Container */}
+            <div className="flex-1 overflow-y-auto px-3 py-1.5 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-gray-100 [&::-webkit-scrollbar-thumb]:bg-gray-300">
+              <div className="space-y-1.5">
+                <MindmapContainer
+                  fileId={fileId}
+                  sessionId={sessionId}
+                  uploadedDocuments={uploadedDocuments}
+                  apiBaseUrl={API_BASE_URL}
+                  getAuthToken={getAuthToken}
+                  showMindmap={showMindmap}
+                  setShowMindmap={setShowMindmap}
+                  selectedMindmapMessageId={selectedMindmapMessageId}
+                  setSelectedMindmapMessageId={setSelectedMindmapMessageId}
+                  mindmapData={mindmapData}
+                  setMindmapData={setMindmapData}
+                  isGeneratingMindmap={isGeneratingMindmap}
+                  setIsGeneratingMindmap={setIsGeneratingMindmap}
+                  mindmapError={mindmapError}
+                  setMindmapError={setMindmapError}
+                  onMindmapItemClick={() => {
+                    setSelectedMessageId(null);
+                  }}
+                />
+                <MessagesList
               messages={messages}
               selectedMessageId={selectedMessageId}
               handleMessageClick={handleMessageClick}
@@ -5554,6 +5628,8 @@ const AnalysisPage = () => {
               formatDate={formatDate}
               searchQuery={searchQuery}
             />
+              </div>
+            </div>
             <div className="border-t border-gray-200 p-3 bg-white flex-shrink-0">
               {documentData && (
                 <div className="mb-2 p-1.5 bg-gray-50 rounded-lg border border-gray-200">
@@ -5629,6 +5705,36 @@ const AnalysisPage = () => {
                       </div>
                     )}
                   </div>
+                  <div className="relative flex-shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setShowToolsDropdown(!showToolsDropdown)}
+                      disabled={isLoading || isGeneratingInsights || !fileId}
+                      className="flex items-center space-x-1 px-2 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="Tools"
+                    >
+                      <Wrench className="h-3 w-3" />
+                      <span>Tools</span>
+                      <ChevronDown className="h-3 w-3" />
+                    </button>
+                    {showToolsDropdown && (
+                      <div className="absolute bottom-full left-0 mb-2 w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-20">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowMindmap(true);
+                            setShowToolsDropdown(false);
+                            setSelectedMindmapMessageId('mindmap');
+                            setSelectedMessageId(null);
+                          }}
+                          className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 first:rounded-t-lg last:rounded-b-lg flex items-center space-x-2"
+                        >
+                          <Network className="h-4 w-4" />
+                          <span>Mindmap</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 <input
                   type="text"
                   value={chatInput}
@@ -5676,19 +5782,27 @@ const AnalysisPage = () => {
           <div className="w-full lg:w-3/5 flex flex-col h-2/3 lg:h-full bg-gray-50">
             <div className="flex-1 p-2 sm:p-4 min-h-0">
               <div className="h-full">
-                <DocumentViewer
-                  selectedMessageId={selectedMessageId}
-                  currentResponse={currentResponse}
-                  animatedResponseContent={animatedResponseContent}
-                  messages={messages}
-                  handleCopyResponse={handleCopyResponse}
-                  markdownOutputRef={markdownOutputRef}
-                  isAnimatingResponse={isAnimatingResponse}
-                  showResponseImmediately={showResponseImmediately}
-                  formatDate={formatDate}
-                  markdownComponents={markdownComponents}
-                  responseContainerRef={responseRef}
-                />
+                {showMindmap && selectedMindmapMessageId === 'mindmap' ? (
+                  <MindmapViewer 
+                    mindmapData={mindmapData} 
+                    apiBaseUrl={API_BASE_URL}
+                    getAuthToken={getAuthToken}
+                  />
+                ) : (
+                  <DocumentViewer
+                    selectedMessageId={selectedMessageId}
+                    currentResponse={currentResponse}
+                    animatedResponseContent={animatedResponseContent}
+                    messages={messages}
+                    handleCopyResponse={handleCopyResponse}
+                    markdownOutputRef={markdownOutputRef}
+                    isAnimatingResponse={isAnimatingResponse}
+                    showResponseImmediately={showResponseImmediately}
+                    formatDate={formatDate}
+                    markdownComponents={markdownComponents}
+                    responseContainerRef={responseRef}
+                  />
+                )}
               </div>
             </div>
           </div>
