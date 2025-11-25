@@ -989,6 +989,78 @@ const Mindmap = ({ fileId, uploadedDocuments, apiBaseUrl, getAuthToken }) => {
     );
   };
 
+  // Helper function to check if file is processed
+  const checkFileStatus = async (fileId) => {
+    try {
+      const token = getAuthToken();
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      
+      const response = await fetch(`${apiBaseUrl}/files/status/${fileId}`, {
+        method: 'GET',
+        headers,
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        return data.status === 'processed' || data.status === 'completed';
+      }
+      return false;
+    } catch (error) {
+      console.warn('Could not check file status:', error);
+      return true; // Assume processed if check fails
+    }
+  };
+
+  // Helper function to make API request with retry logic
+  const makeRequestWithRetry = async (url, headers, requestBody, maxRetries = 2, retryDelay = 1000) => {
+    let lastError;
+    
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        if (attempt > 0) {
+          // Wait before retrying (exponential backoff)
+          const delay = retryDelay * Math.pow(2, attempt - 1);
+          console.log(`Retrying mindmap generation (attempt ${attempt + 1}/${maxRetries + 1}) after ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+
+        const response = await fetch(url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(requestBody),
+        });
+
+        if (!response.ok) {
+          // If it's a 500 error and we have retries left, retry
+          if (response.status === 500 && attempt < maxRetries) {
+            lastError = new Error(`Server error (500). Retrying...`);
+            console.warn(`Server error on attempt ${attempt + 1}, will retry...`);
+            continue;
+          }
+          
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.error || errorData.message || `HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        return data;
+      } catch (err) {
+        lastError = err;
+        // If it's not a 500 error or we're out of retries, throw immediately
+        if (err.message && !err.message.includes('500') && !err.message.includes('Server error')) {
+          throw err;
+        }
+        // For 500 errors, continue to retry
+        if (attempt < maxRetries) {
+          continue;
+        }
+      }
+    }
+    
+    throw lastError || new Error('Failed to generate mindmap after retries');
+  };
+
   const generateMindmap = async () => {
     if (selectedFileIds.length === 0) {
       setError('Please select at least one file');
@@ -999,6 +1071,16 @@ const Mindmap = ({ fileId, uploadedDocuments, apiBaseUrl, getAuthToken }) => {
     setError(null);
 
     try {
+      // Check if files are processed before generating (for single file)
+      if (selectedFileIds.length === 1) {
+        const isProcessed = await checkFileStatus(selectedFileIds[0]);
+        if (!isProcessed) {
+          setError('File is still processing. Please wait until processing is complete.');
+          setIsLoading(false);
+          return;
+        }
+      }
+
       const token = getAuthToken();
       const headers = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -1022,18 +1104,9 @@ const Mindmap = ({ fileId, uploadedDocuments, apiBaseUrl, getAuthToken }) => {
         url = `${apiBaseUrl}/visual/generate-flowchart-multi`;
       }
 
-      const response = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(requestBody),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || errorData.message || `HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
+      // Use retry logic for the request
+      const data = await makeRequestWithRetry(url, headers, requestBody);
+      
       setMindmapData(data);
       setZoom(1);
       setPan({ x: 0, y: 0 });
