@@ -217,12 +217,12 @@ const DocumentsList = () => {
   }, [documents]);
 
   const handleUpload = (files) => {
-    // Check file size limit (30 MB)
-    const MAX_FILE_SIZE = 30 * 1024 * 1024; // 30 MB in bytes
+    // Check file size limit (100 MB)
+    const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100 MB in bytes
     const oversizedFiles = Array.from(files).filter(file => file.size > MAX_FILE_SIZE);
     
     if (oversizedFiles.length > 0) {
-      toast.error('File size limit exceeded. You can upload only up to 30 MB.', {
+      toast.error('File size limit exceeded. You can upload only up to 100 MB.', {
         autoClose: 5000
       });
       return;

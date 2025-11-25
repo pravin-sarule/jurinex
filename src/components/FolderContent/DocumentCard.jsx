@@ -1725,16 +1725,6 @@ const DocumentCard = ({ document, individualStatus, onDocumentClick, onDelete })
               />
             </div>
           )}
-
-          {/* Success indicator */}
-          {isCompleted && (
-            <div className="mt-3 flex items-center gap-2 p-2 bg-green-50 rounded-md border border-green-200">
-              <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0" />
-              <span className="text-xs font-medium text-green-700">
-                Processing completed successfully.
-              </span>
-            </div>
-          )}
         </div>
       </div>
     </div>

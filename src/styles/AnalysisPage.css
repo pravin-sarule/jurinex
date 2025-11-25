@@ -8,7 +8,7 @@
 ====================================================== */
 .analysis-page-ai-response {
   font-family: "Crimson Text", Georgia, "Times New Roman", serif !important;
-  font-size: 20px;
+  font-size: 22px;
   line-height: 1.6;
   color: #111;
 }
@@ -17,7 +17,7 @@
 
 
 .response-content h2 {
-  font-size: 1.3rem;
+  font-size: 1.5rem;
   font-weight: 700;
   color: #1a202c;
   margin-top: 2rem;
@@ -25,7 +25,7 @@
 }
 
 .response-content h3 {
-  font-size: 1.15rem;
+  font-size: 1.3rem;
   font-weight: 600;
   color: #1a202c;
   margin-top: 1.5rem;
@@ -34,7 +34,7 @@
 
 .response-content p {
   margin-bottom: 0.75rem;
-  font-size: 16px;
+  font-size: 18px;
   line-height: 1.6;
   color: #111827;
 }
@@ -47,7 +47,7 @@
   border-collapse: collapse;       /* full grid layout */
   margin: 1.5rem 0;
   font-family: "Inter", sans-serif; /* Revert to original or default */
-  font-size: 15px; /* Revert to original or default */
+  font-size: 17px; /* Increased from 15px */
   background-color: #ffffff;
   border: 1px solid #d1d5db;       /* outer border */
   border-radius: 8px;
@@ -65,7 +65,7 @@
   border: 1px solid #e5e7eb;       /* inner grid lines */
   font-weight: 600;
   color: #374151;                  /* gray-700 */
-  font-size: 14px; /* Revert to original or default */
+  font-size: 16px; /* Increased from 14px */
   text-align: left;
   background-color: #f3f4f6;       /* gray-100 */
   text-transform: uppercase;
@@ -114,36 +114,16 @@
 }
 
 .prose table {
-  font-size: 18px !important; /* Apply to the table itself */
+  font-size: 20px !important; /* Increased from 18px */
 }
 
 .prose th {
-  font-size: 16px !important; /* Apply to table headers */
+  font-size: 18px !important; /* Increased from 16px */
   font-weight: 600 !important;
 }
 
 .prose td {
-  font-size: 16px !important; /* Apply to table data cells */
-}
-
-/* Ensure font consistency within markdown-rendered tables */
-.prose table,
-.prose th,
-.prose td {
-  font-family: "Crimson Text", Georgia, "Times New Roman", serif !important;
-}
-
-.prose table {
-  font-size: 18px !important; /* Apply to the table itself */
-}
-
-.prose th {
-  font-size: 16px !important; /* Apply to table headers */
-  font-weight: 600 !important;
-}
-
-.prose td {
-  font-size: 16px !important; /* Apply to table data cells */
+  font-size: 18px !important; /* Increased from 16px */
 }
 
 /* ---------- Responsive Wrapper ---------- */
@@ -161,7 +141,7 @@
   padding: 3px 8px;
   border-radius: 6px;
   font-weight: 500;
-  font-size: 14px; /* Revert to original or default */
+  font-size: 16px; /* Increased from 14px */
   line-height: 1.3;
 }
 

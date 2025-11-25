@@ -1,7 +1,4 @@
 
-
-
-
 import React, { useState, useEffect, useContext, useRef, useMemo } from "react";
 import { FileManagerContext } from "../../context/FileManagerContext";
 import documentApi from "../../services/documentApi";
@@ -9604,7 +9601,12 @@ const ChatInterface = () => {
   const handleStopGeneration = () => {
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
+      clearTimeout(animationFrameRef.current);
       animationFrameRef.current = null;
+    }
+    // Show full response immediately when stopped
+    if (streamBufferRef.current) {
+      setAnimatedResponseContent(streamBufferRef.current);
     }
     setIsAnimatingResponse(false);
     setIsGenerating(false);
@@ -9616,6 +9618,7 @@ const ChatInterface = () => {
     return () => {
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
+        clearTimeout(animationFrameRef.current);
       }
       // Cleanup streaming
       if (streamReaderRef.current) {
@@ -9929,6 +9932,8 @@ const ChatInterface = () => {
               setHasResponse(true);
               setHasAiResponse(true);
               setForceSidebarCollapsed(true);
+              // Animate the complete response word-by-word
+              animateResponse(finalResponse);
             }
             setChatInput("");
             break;
@@ -9977,6 +9982,8 @@ const ChatInterface = () => {
                 setHasResponse(true);
                 setHasAiResponse(true);
                 setForceSidebarCollapsed(true);
+                // Animate the complete response word-by-word
+                animateResponse(finalResponse);
               }
               setChatInput("");
               return;
@@ -9992,28 +9999,15 @@ const ChatInterface = () => {
                 newSessionId = parsed.session_id || parsed.sessionId || newSessionId;
                 messageId = parsed.message_id || parsed.id || messageId;
               } else if (parsed.type === 'chunk') {
-                // Append chunk to buffer
+                // Append chunk to buffer (don't show during streaming - wait for completion)
                 streamBufferRef.current += parsed.text || '';
-                
-                // Update UI every 50ms for performance (prevents React freezing)
-                if (streamUpdateTimeoutRef.current) {
-                  clearTimeout(streamUpdateTimeoutRef.current);
-                }
-                
-                streamUpdateTimeoutRef.current = setTimeout(() => {
-                  setAnimatedResponseContent(streamBufferRef.current);
-                  setHasResponse(true);
-                  setHasAiResponse(true);
-                  setForceSidebarCollapsed(true);
-                  if (responseRef.current) {
-                    responseRef.current.scrollTop = responseRef.current.scrollHeight;
-                  }
-                }, 50);
               } else if (parsed.type === 'done') {
-                // Final metadata
+                // Final metadata - stream complete, now animate the response
                 finalMetadata = parsed;
-                setAnimatedResponseContent(streamBufferRef.current);
+                const finalResponse = streamBufferRef.current;
                 setLoadingChat(false);
+                // Animate the complete response word-by-word
+                animateResponse(finalResponse);
               } else if (parsed.type === 'error') {
                 setChatError(parsed.error);
                 setLoadingChat(false);

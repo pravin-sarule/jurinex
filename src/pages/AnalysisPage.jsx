@@ -3785,10 +3785,10 @@ const AnalysisPage = () => {
 
     // If response is very short, show it immediately
     if (words.length <= 3) {
-      setIsAnimatingResponse(false);
+        setIsAnimatingResponse(false);
       setAnimatedResponseContent(text);
-      return;
-    }
+        return;
+      }
 
     const animateWord = () => {
       if (currentIndex < words.length) {
