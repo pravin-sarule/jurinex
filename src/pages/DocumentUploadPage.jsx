@@ -631,7 +631,7 @@ const DocumentUploadPage = () => {
                     </div>
                   </div>
 
-                  <h3 className="text-base font-semibold text-gray-900 mb-2 group-hover:text-[#21C1B6] transition-colors line-clamp-2">
+                  <h3 className="text-base font-semibold text-gray-900 mb-2 group-hover:text-[#21C1B6] transition-colors break-words">
                     {draftData.draft_data.caseTitle || 'Untitled Case Draft'}
                   </h3>
 
@@ -670,7 +670,7 @@ const DocumentUploadPage = () => {
                     </div>
                   </div>
 
-                  <h3 className="text-base font-semibold text-gray-900 mb-2 group-hover:text-[#21C1B6] transition-colors line-clamp-2">
+                  <h3 className="text-base font-semibold text-gray-900 mb-2 group-hover:text-[#21C1B6] transition-colors break-words">
                     {folder.name}
                   </h3>
 

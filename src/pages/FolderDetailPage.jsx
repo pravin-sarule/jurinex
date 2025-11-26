@@ -911,11 +911,11 @@ const FolderDetailPage = () => {
           )}
         </div>
         {/* Document Upload Header */}
-        <div className="flex-shrink-0 flex justify-between items-center p-0">
-          <h1 className="text-xl font-bold">
+        <div className="flex-shrink-0 flex justify-between items-start p-0 gap-3">
+          <h1 className="text-xl font-bold min-w-0 flex-1 break-words pr-2">
             {selectedFolder || "Document Upload"}
           </h1>
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-2 flex-shrink-0">
             <button onClick={() => setShowMoreMenu((prev) => !prev)}>
               <MoreVertical className="w-4 h-4 text-gray-600" />
             </button>

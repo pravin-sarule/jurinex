@@ -14,11 +14,13 @@ import {
   Copy,
   Check,
   Square,
+  Trash2,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { SidebarContext } from "../../context/SidebarContext";
 import DownloadPdf from "../DownloadPdf/DownloadPdf";
+import { toast } from "react-toastify";
 import "../../styles/ChatInterface.css";
 
 // Previous commented code below
@@ -9305,6 +9307,7 @@ const ChatInterface = () => {
     if (typeof window === "undefined") return false;
     return window.innerWidth < 1024;
   });
+  const [openChatMenuId, setOpenChatMenuId] = useState(null);
 
   const responseHasTable = useMemo(() => {
     if (!animatedResponseContent) return false;
@@ -9325,6 +9328,7 @@ const ChatInterface = () => {
   const streamBufferRef = useRef('');
   const streamUpdateTimeoutRef = useRef(null);
   const streamReaderRef = useRef(null);
+  const chatMenuRefs = useRef({});
 
   // API Configuration
   const API_BASE_URL = "https://gateway-service-110685455967.asia-south1.run.app";
@@ -10046,6 +10050,72 @@ const ChatInterface = () => {
     setForceSidebarCollapsed(true);
   };
 
+  // Handle delete single chat
+  const handleDeleteChat = async (chatId, e) => {
+    if (e) {
+      e.stopPropagation(); // Prevent triggering the onClick for the chat card
+    }
+    
+    setOpenChatMenuId(null); // Close the menu
+    
+    if (!selectedFolder || !chatId) return;
+
+    if (!window.confirm('Are you sure you want to delete this chat? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      setLoadingChat(true);
+      setChatError(null);
+      
+      const deletePromise = documentApi.deleteSingleFolderChat(selectedFolder, chatId);
+      
+      toast.promise(deletePromise, {
+        pending: 'Deleting chat...',
+        success: 'Chat deleted successfully!',
+        error: {
+          render({ data }) {
+            const errorMessage = data?.response?.data?.error || data?.message || 'Failed to delete chat';
+            return errorMessage;
+          },
+        },
+      });
+      
+      await deletePromise;
+      console.log(`✅ Successfully deleted chat ${chatId}`);
+      
+      // Remove the chat from the current history
+      setCurrentChatHistory(prev => prev.filter(chat => chat.id !== chatId));
+      
+      // If the deleted chat was selected, clear the selection
+      if (selectedMessageId === chatId) {
+        setSelectedMessageId(null);
+        setAnimatedResponseContent("");
+        setHasResponse(false);
+        setHasAiResponse(false);
+        setForceSidebarCollapsed(false);
+      }
+      
+      // Refresh the chat list
+      await fetchChatHistory();
+    } catch (err) {
+      console.error("❌ Error deleting chat:", err);
+      const errorMessage = err?.response?.data?.error || err?.message || 'Failed to delete chat';
+      setChatError(errorMessage);
+      // Error is handled by toast.promise
+    } finally {
+      setLoadingChat(false);
+    }
+  };
+
+  // Handle chat menu toggle
+  const handleChatMenuToggle = (chatId, e) => {
+    if (e) {
+      e.stopPropagation(); // Prevent triggering the onClick for the chat card
+    }
+    setOpenChatMenuId(openChatMenuId === chatId ? null : chatId);
+  };
+
   // Handle new chat
   const handleNewChat = () => {
     if (animationFrameRef.current) {
@@ -10066,6 +10136,63 @@ const ChatInterface = () => {
     setSelectedSecretId(null);
     setSelectedLlmName(null);
     setActiveDropdown("Custom Query");
+  };
+
+  // Handle delete all chats
+  const handleDeleteAllChats = async () => {
+    if (!selectedFolder) return;
+    
+    const chatCount = currentChatHistory.length;
+    if (chatCount === 0) {
+      toast.info("No chats to delete.");
+      return;
+    }
+
+    if (!window.confirm(`Are you sure you want to delete all ${chatCount} chat(s) in this folder? This action cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      setLoadingChat(true);
+      setChatError(null);
+      
+      const deletePromise = documentApi.deleteAllFolderChats(selectedFolder);
+      
+      toast.promise(deletePromise, {
+        pending: 'Deleting all chats...',
+        success: `All ${chatCount} chat(s) deleted successfully!`,
+        error: {
+          render({ data }) {
+            const errorMessage = data?.response?.data?.error || data?.message || 'Failed to delete all chats';
+            return errorMessage;
+          },
+        },
+      });
+      
+      await deletePromise;
+      console.log(`✅ Successfully deleted all chats from folder ${selectedFolder}`);
+      
+      // Clear the chat history and reset state
+      setCurrentChatHistory([]);
+      setSelectedChatSessionId(null);
+      setHasResponse(false);
+      setHasAiResponse(false);
+      setForceSidebarCollapsed(false);
+      setSelectedMessageId(null);
+      setAnimatedResponseContent("");
+      setIsAnimatingResponse(false);
+      setIsGenerating(false);
+      
+      // Optionally refresh the chat list
+      await fetchChatHistory();
+    } catch (err) {
+      console.error("❌ Error deleting all chats:", err);
+      const errorMessage = err?.response?.data?.error || err?.message || 'Failed to delete all chats';
+      setChatError(errorMessage);
+      // Error is handled by toast.promise
+    } finally {
+      setLoadingChat(false);
+    }
   };
 
   // Handle dropdown selection
@@ -10129,6 +10256,24 @@ const ChatInterface = () => {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  // Close chat menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (openChatMenuId && chatMenuRefs.current[openChatMenuId]) {
+        if (!chatMenuRefs.current[openChatMenuId].contains(event.target)) {
+          setOpenChatMenuId(null);
+        }
+      }
+    };
+
+    if (openChatMenuId) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => {
+        document.removeEventListener("mousedown", handleClickOutside);
+      };
+    }
+  }, [openChatMenuId]);
+
   // Load secrets on mount
   useEffect(() => {
     fetchSecrets();
@@ -10182,12 +10327,25 @@ const ChatInterface = () => {
         <div className="p-4 border-b border-black border-opacity-20 flex-shrink-0">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-gray-900">Questions</h2>
-            <button
-              onClick={handleNewChat}
-              className="px-3 py-1.5 text-sm font-medium text-white bg-[#21C1B6] hover:bg-[#1AA49B] rounded-md transition-colors"
-            >
-              New Chat
-            </button>
+            <div className="flex items-center gap-2">
+              {currentChatHistory.length > 0 && (
+                <button
+                  onClick={handleDeleteAllChats}
+                  disabled={loadingChat}
+                  className="px-3 py-1.5 text-sm font-medium text-white bg-red-600 hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed rounded-md transition-colors flex items-center gap-1.5"
+                  title="Delete all chats"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Delete All
+                </button>
+              )}
+              <button
+                onClick={handleNewChat}
+                className="px-3 py-1.5 text-sm font-medium text-white bg-[#21C1B6] hover:bg-[#1AA49B] rounded-md transition-colors"
+              >
+                New Chat
+              </button>
+            </div>
           </div>
           <div className="relative mb-4">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -10215,7 +10373,7 @@ const ChatInterface = () => {
                 <div
                   key={chat.id}
                   onClick={() => handleSelectChat(chat)}
-                  className={`p-3 rounded-lg border cursor-pointer transition-all duration-200 hover:shadow-md ${
+                  className={`p-3 rounded-lg border cursor-pointer transition-all duration-200 hover:shadow-md group ${
                     selectedMessageId === chat.id
                       ? "bg-blue-50 border-blue-200 shadow-sm"
                       : "bg-white border-gray-200 hover:bg-gray-50"
@@ -10228,12 +10386,28 @@ const ChatInterface = () => {
                       </p>
                       <p className="text-xs text-gray-500">{getRelativeTime(chat.created_at || chat.timestamp)}</p>
                     </div>
-                    <button
-                      onClick={(e) => e.stopPropagation()}
-                      className="p-1 hover:bg-gray-100 rounded-lg transition-colors"
-                    >
-                      <MoreVertical className="h-5 w-5 text-gray-400" />
-                    </button>
+                    <div className={`relative transition-opacity duration-200 ${openChatMenuId === chat.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`} ref={(el) => (chatMenuRefs.current[chat.id] = el)}>
+                      <button
+                        onClick={(e) => handleChatMenuToggle(chat.id, e)}
+                        className="p-1 hover:bg-gray-100 rounded-lg transition-colors"
+                        title="More options"
+                        type="button"
+                      >
+                        <MoreVertical className="h-4 w-4 text-gray-600" />
+                      </button>
+                      {openChatMenuId === chat.id && (
+                        <div className="absolute right-0 top-8 mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
+                          <button
+                            onClick={(e) => handleDeleteChat(chat.id, e)}
+                            className="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2 rounded-lg transition-colors"
+                            type="button"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                            Delete
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               ))}
@@ -10242,60 +10416,83 @@ const ChatInterface = () => {
         </div>
         {/* Input Area */}
         <div className="border-t border-gray-200 p-2 bg-white flex-shrink-0">
-          <div className="bg-white rounded-xl shadow-sm border border-[#21C1B6] p-3">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (isGenerating) {
+                handleStopGeneration();
+              } else {
+                handleNewMessage();
+              }
+            }}
+            className="flex items-center space-x-3 bg-white rounded-xl border border-[#21C1B6] px-4 py-4 focus-within:ring-[#21C1B6] focus-within:shadow-sm"
+          >
+            {/* Analysis Dropdown */}
+            <div className="relative flex-shrink-0" ref={dropdownRef}>
+              <button
+                type="button"
+                onClick={() => setShowDropdown(!showDropdown)}
+                disabled={isLoadingSecrets || loadingChat}
+                className="flex items-center space-x-2 px-2.5 py-1.5 text-xs font-medium text-gray-700 bg-white border border-[#21C1B6] rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <BookOpen className="h-3.5 w-3.5" />
+                <span>{isLoadingSecrets ? "Loading..." : activeDropdown}</span>
+                <ChevronDown className="h-3.5 w-3.5" />
+              </button>
+              {showDropdown && !isLoadingSecrets && (
+                <div className="absolute bottom-full left-0 mb-2 w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-20 max-h-60 overflow-y-auto">
+                  {secrets.length > 0 ? (
+                    secrets.map((secret) => (
+                      <button
+                        key={secret.id}
+                        type="button"
+                        onClick={() => handleDropdownSelect(secret.name, secret.id, secret.llm_name)}
+                        className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 first:rounded-t-lg last:rounded-b-lg"
+                      >
+                        {secret.name}
+                      </button>
+                    ))
+                  ) : (
+                    <div className="px-4 py-2.5 text-sm text-gray-500">
+                      No analysis prompts available
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
             <input
               type="text"
               placeholder={isSecretPromptSelected ? `Analysis: ${activeDropdown}` : "How can I help you today?"}
               value={chatInput}
               onChange={handleChatInputChange}
-              onKeyPress={(e) => e.key === "Enter" && !e.shiftKey && handleNewMessage()}
-              className="w-full text-base text-gray-700 placeholder-gray-400 outline-none bg-transparent focus:ring-2 focus:ring-[#21C1B6] border-[#21C1B6]"
+              onKeyPress={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  handleNewMessage();
+                }
+              }}
+              className="flex-grow bg-transparent border-none outline-none text-gray-900 placeholder-gray-500 text-sm font-medium py-2 min-w-0"
               disabled={loadingChat}
             />
-            <div className="flex items-center justify-between mt-2">
-              <div className="relative" ref={dropdownRef}>
-                <button
-                  onClick={() => setShowDropdown(!showDropdown)}
-                  disabled={isLoadingSecrets || loadingChat}
-                  className="flex items-center space-x-2 px-4 py-2.5 bg-[#21C1B6] text-white rounded-lg hover:bg-[#1AA49B] transition-colors disabled:opacity-50"
-                >
-                  <BookOpen className="h-4 w-4" />
-                  <span className="text-sm font-medium">{isLoadingSecrets ? "Loading..." : activeDropdown}</span>
-                  <ChevronDown className="h-4 w-4" />
-                </button>
-                {showDropdown && !isLoadingSecrets && (
-                  <div className="absolute bottom-full left-0 mb-2 w-56 bg-white border border-gray-200 rounded-lg shadow-lg z-20 max-h-60 overflow-y-auto scrollbar-custom">
-                    {secrets.length > 0 ? (
-                      secrets.map((secret) => (
-                        <button
-                          key={secret.id}
-                          onClick={() => handleDropdownSelect(secret.name, secret.id, secret.llm_name)}
-                          className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50"
-                        >
-                          {secret.name}
-                        </button>
-                      ))
-                    ) : (
-                      <div className="px-4 py-2.5 text-sm text-gray-500">No analysis prompts available</div>
-                    )}
-                  </div>
-                )}
-              </div>
-              <button
-                onClick={isGenerating ? handleStopGeneration : handleNewMessage}
-                disabled={loadingChat || (!chatInput.trim() && !isSecretPromptSelected && !isGenerating)}
-                className={buttonClass}
-              >
-                {loadingChat && !isGenerating ? (
-                  <Loader2 className="h-5 w-5 text-white animate-spin" />
-                ) : isGenerating ? (
-                  <Square className="h-4 w-4 text-white" />
-                ) : (
-                  <Send className="h-5 w-5 text-white" />
-                )}
-              </button>
-            </div>
-          </div>
+            <button
+              type="submit"
+              className={`p-1.5 text-white rounded-lg transition-colors flex-shrink-0 ${
+                isGenerating 
+                  ? "bg-gray-500 hover:bg-gray-600" 
+                  : "bg-[#21C1B6] hover:bg-[#1AA49B]"
+              } disabled:bg-gray-300`}
+              disabled={loadingChat || (!chatInput.trim() && !isSecretPromptSelected && !isGenerating)}
+            >
+              {loadingChat && !isGenerating ? (
+                <Loader2 className="h-4 w-4 text-white animate-spin" />
+              ) : isGenerating ? (
+                <Square className="h-4 w-4 text-white" />
+              ) : (
+                <Send className="h-4 w-4 text-white" />
+              )}
+            </button>
+          </form>
           {chatError && (
             <div className="mt-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-xl text-sm">
               {chatError}

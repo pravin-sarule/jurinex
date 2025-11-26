@@ -278,11 +278,11 @@ const DocumentsList = () => {
   return (
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-6xl mx-auto">
-        <div className="flex justify-between items-center mb-6">
-          <h1 className="text-2xl font-bold text-gray-800">Documents</h1>
+        <div className="flex justify-between items-start mb-6 gap-3">
+          <h1 className="text-2xl font-bold text-gray-800 min-w-0 flex-1 break-words pr-2">Documents</h1>
           <button
             onClick={() => setIsUploadModalOpen(true)}
-            className="px-4 py-2 text-white rounded-md hover:opacity-90 transition-opacity duration-200"
+            className="px-4 py-2 text-white rounded-md hover:opacity-90 transition-opacity duration-200 flex-shrink-0"
             style={{ backgroundColor: '#21C1B6' }}
           >
             Upload Documents

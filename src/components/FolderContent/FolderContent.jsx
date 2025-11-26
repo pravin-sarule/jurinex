@@ -1506,9 +1506,11 @@ const FolderContent = ({ onDocumentClick }) => {
  `,
  }}
  />
- <div className="flex justify-between items-center mb-3 flex-shrink-0">
- <h2 className="text-lg font-semibold">Folder: {selectedFolder}</h2>
- <div>
+ <div className="flex justify-between items-start mb-3 flex-shrink-0 gap-3">
+ <h2 className="text-lg font-semibold min-w-0 flex-1 break-words pr-2">
+ Folder: {selectedFolder}
+ </h2>
+ <div className="flex-shrink-0">
  <label
  htmlFor="document-upload"
  className={`cursor-pointer ${

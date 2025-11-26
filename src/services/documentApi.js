@@ -1973,6 +1973,24 @@ const documentApi = {
     return response.data;
   },
 
+  // Delete a single chat in a folder
+  deleteSingleFolderChat: async (folderName, chatId) => {
+    const response = await axios.delete(
+      `${API_BASE_URL}/${folderName}/chats/${chatId}`,
+      { headers: getAuthHeader() }
+    );
+    return response.data;
+  },
+
+  // Delete all chats in a folder
+  deleteAllFolderChats: async (folderName) => {
+    const response = await axios.delete(
+      `${API_BASE_URL}/${folderName}/chats`,
+      { headers: getAuthHeader() }
+    );
+    return response.data;
+  },
+
   // Get all cases
   getCases: async () => {
     const response = await axios.get(`${API_BASE_URL}/cases`, {
