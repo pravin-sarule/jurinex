@@ -664,14 +664,15 @@ class ApiService {
  }
  }
 
+
  // Get user files
  async getChatModelFiles() {
- return this.chatModelRequest("/api/chat/files");
+ return this.chatModelRequest("/chat/files");
  }
 
  // Get chat history
  async getChatModelHistory(fileId, sessionId = null) {
- let endpoint = `/api/chat/history/${fileId}`;
+ let endpoint = `/chat/history/${fileId}`;
  if (sessionId) {
    endpoint += `?session_id=${sessionId}`;
  }
@@ -680,7 +681,7 @@ class ApiService {
 
  // Get document sessions
  async getChatModelSessions(fileId) {
- return this.chatModelRequest(`/api/chat/sessions/${fileId}`);
+ return this.chatModelRequest(`/chat/sessions/${fileId}`);
  }
 }
 
